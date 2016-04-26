@@ -2,6 +2,7 @@
 #include "Include/pcap.h"
 #include<winsock2.h>   
 #include"capPack.h"
+#include<malloc.h>
 
 #pragma comment(lib,"Lib/wpcap.lib")   
 #pragma comment(lib,"Lib/packet.lib")   
@@ -58,10 +59,14 @@ int main()
 	pcap_if_t *alldevs=NULL;     //存放网卡设备
 	pcap_if_t *d=NULL;			//显示网卡设备
 	int snum=0;				//输入数字默认为0
-	int i = 0;				//遍历计数器
+	int i = 0;				//记录设备数
 	pcap_t *adhandle=NULL;		//当前设备
 	char errbuf[PCAP_ERRBUF_SIZE];//错误码
-
+	int count = 0;				//抓包计数器
+	char* SavePath = (char*)malloc(MAX_PATH*sizeof(char));
+	char* savecapfile;
+	pcap_dumper_t* dumpfile;
+	
 	/*获取设备列表*/
 	if (pcap_findalldevs(&alldevs, errbuf) == -1)
 	{
@@ -71,7 +76,7 @@ int main()
 	/*输出设备列表*/
 	for (d = alldevs; d; d = d->next)
 	{
-		printf("%d. %s", ++i, d->name);
+		printf("%d. %s", ++i, d->name);			//输出设备名，设备数i+1
 		if (d->description)
 			printf(" (%s)\n", d->description);
 		else
@@ -105,14 +110,30 @@ int main()
 		pcap_freealldevs(alldevs);
 		return -1;
 	}
+	printf("\n请输入抓包的数量(10):");
+	scanf_s("%d", &count);
+	if (count < 1 || count > 65500)
+	{
+		printf("\n请输入抓包的数量>1且<65500 .\n");
+		pcap_freealldevs(alldevs);
+		return -1;
+	}
 	printf("\nlistening on %s...\n", d->description);
 	pcap_freealldevs(alldevs);		//释放设备列表
-	pcap_loop(adhandle, 0, packet_handler, NULL);
+	getchar();
+	//fflush(stdin);
+	savecapfile = GetSavePath();
+
+	dumpfile = pcap_dump_open(adhandle, savecapfile);
+	pcap_loop(adhandle,count, packet_handler, (u_char*)dumpfile);
+	pcap_close(adhandle);
+	printf("\n数据保存完毕，文件路径为:%s", savecapfile);
+	system("pause");
 	return 0;
 }
 
 /* Callback function invoked by libpcap for every incoming packet */
-void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data)
+void packet_handler(u_char *dumpfile, const struct pcap_pkthdr *header, const u_char *pkt_data)
 {
 	struct tm *ltime;
 	char timestr[16];
@@ -121,19 +142,13 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 	u_int ip_len;
 	u_short sport, dport;
 	time_t local_tv_sec;
-
-	/*
-	* unused parameter
-	*/
-	(VOID)(param);
-
 	/* convert the timestamp to readable format */
 	local_tv_sec = header->ts.tv_sec;
 	ltime = localtime(&local_tv_sec);
 	strftime(timestr, sizeof timestr, "%H:%M:%S", ltime);
 
 	/* print timestamp and length of the packet */
-	printf("%s.%.6d len:%d ", timestr, header->ts.tv_usec, header->len);
+	printf("\n%s.%.6d len:%d ", timestr, header->ts.tv_usec, header->len);
 
 	/* retireve the position of the ip header */
 	ih = (ip_header *)(pkt_data +
@@ -148,7 +163,7 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 	dport = ntohs(uh->dport);
 
 	/* print ip addresses and udp ports */
-	printf("%d.%d.%d.%d.%d -> %d.%d.%d.%d.%d\n",
+	printf("\n%d.%d.%d.%d.%d -> %d.%d.%d.%d.%d",
 		ih->saddr.byte1,
 		ih->saddr.byte2,
 		ih->saddr.byte3,
@@ -159,4 +174,6 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 		ih->daddr.byte3,
 		ih->daddr.byte4,
 		dport);
+	/* save the packet on the dump file */
+	pcap_dump(dumpfile, header, pkt_data);
 }
